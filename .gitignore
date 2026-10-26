@@ -1,0 +1,13 @@
+# 编译产物
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+build_log.txt
+Setup Log*.txt
+
+# 运行期目录
+软件本体/
+旧版本封存/
+安装包/output/

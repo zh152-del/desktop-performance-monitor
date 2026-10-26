@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build"
+         xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
+          Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{8F3C1A22-7C4B-4F7E-9D51-2B6E9A4D1C10}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>PerfMonitorWPF</RootNamespace>
+    <AssemblyName>桌面性能助手</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <WarningLevel>4</WarningLevel>
+    <Deterministic>true</Deterministic>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <!-- 不指定 LangVersion：兼容旧版 C# 编译器（只支持到 5），
+         新版 Roslyn 则自动用默认最高版本。代码本身只用 C#5 语法。 -->
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <!-- 本机无 v4.8 Targeting Pack，允许从 GAC 解析（仅产生警告，不影响产物） -->
+    <ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>true</ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <DebugType>none</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      LibreHardwareMonitorLib 0.9.6 —— 从 0.9.4 升级上来，原因：
+      0.9.4 用的是 WinRing0 内核驱动，那是 CVE-2020-14979 的漏洞驱动，
+      火绒 / Microsoft Defender 都会拦（本机 2026-09-21 就报了「漏洞驱动拦截」）。
+      0.9.6 已把驱动换成 PawnIO（官方签名、不在漏洞驱动黑名单）。
+
+      下面 9 个 DLL 全部取自官方发布包 LibreHardwareMonitor.zip（v0.9.6）里的 net472 版本，
+      依赖闭包是从 LibreHardwareMonitorLib 出发算出来的最小集合，
+      少一个都会在启动时抛 FileNotFoundException。
+      【必须全部 Private=True】，否则不会被复制到输出目录。
+    -->
+    <Reference Include="LibreHardwareMonitorLib">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\LibreHardwareMonitorLib.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HidSharp">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\HidSharp.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="BlackSharp.Core">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\BlackSharp.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="DiskInfoToolkit">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\DiskInfoToolkit.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="RAMSPDToolkit-NDD">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\RAMSPDToolkit-NDD.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\System.Memory.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Buffers">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\System.Buffers.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\System.Numerics.Vectors.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>packages\LibreHardwareMonitor.0.9.6\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Management" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Xaml">
+      <RequiredTargetFramework>4.0</RequiredTargetFramework>
+    </Reference>
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Windows.Forms">
+      <RequiredTargetFramework>2.0</RequiredTargetFramework>
+    </Reference>
+    <Reference Include="System.Drawing">
+      <RequiredTargetFramework>2.0</RequiredTargetFramework>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Include="src\App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+    <Page Include="src\MainWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="src\App.xaml.cs">
+      <DependentUpon>App.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="src\MainWindow.xaml.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="src\ArcBuilder.cs" />
+    <Compile Include="src\AppSettings.cs" />
+    <Compile Include="src\DesktopWindow.cs" />
+    <Compile Include="src\DiskPerf.cs" />
+    <Compile Include="src\GlassBackdrop.cs" />
+    <Compile Include="src\HardwareMonitor.cs" />
+    <Compile Include="src\CircuitCard.cs" />
+    <Compile Include="src\DiskRowFx.cs" />
+    <Compile Include="src\MetalMaterial.cs" />
+    <Compile Include="src\MonitorCard.cs" />
+    <Compile Include="src\SystemActions.cs" />
+    <Compile Include="src\TrayIcon.cs" />
+    <Compile Include="src\VolumeIo.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="app.manifest" />
+    <None Include="packages.config" />
+  </ItemGroup>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

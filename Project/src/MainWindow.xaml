@@ -1,0 +1,688 @@
+<Window x:Class="PerfMonitorWPF.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PerfMonitorWPF"
+        Title="桌面性能助手"
+        Width="360" Height="540"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="False"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        FontFamily="Microsoft YaHei UI, Microsoft YaHei, Segoe UI">
+
+    <!-- ============================================================
+         面板本体：360 x 540，圆角 16，深色金属材质（DarkMetal v1.0）。
+         2026-10-24 第四轮（只改材质，布局与交互零改动）：
+           【L0 背景】imgGlass（桌面模糊图）+ glassTint（约 16% 轻压暗）
+           【L1~L5】MetalLayer：金属基底 / 中央暗区 / 三点反射 / 微噪声 / 双描边倒角
+           【L6 内容】功能单元：4~6% 白面 + 12% 白边框（规范 4.4 映射）
+           【圆角】WPF 的 Border 不裁剪子元素，圆角由 MainWindow.xaml.cs
+                  的 UpdateRoundedClip() 用 RectangleGeometry 实现；
+                   金属层的反射光斑另需 MetalClip 的 15px 圆角裁剪（规范 7.2）。
+         结构：rootBorder(圆角裁剪) > imgGlass > glassTint > MetalLayer > 内容/浮层
+         ============================================================ -->
+    <!-- 【底色来源】与参考实现 ProcessPanel V3.0（DarkMetal 规范落地版）一致：
+         根容器**不铺任何底色**，深色金属层直接叠在实时桌面上。
+
+         【"透"由谁决定】由金属层 L1 基底的 alpha 决定（规范 §4.5 的档位），
+         不再对根容器整体加 Opacity——整体 Opacity 会把文字一起洗淡，
+         画面会像糊了一层雾（上一版 0.88 就是这个症状）。
+         想更实/更透：改 App.xaml 里 MetalBaseBrush + MetalVignetteBrush 的档位即可
+         （96% #F5/#9E、88% #E0/#91、80% #CC/#84、70% #B3/#73、60% #99/#63）。 -->
+    <Border x:Name="rootBorder"
+            CornerRadius="16"
+            Background="Transparent">
+
+        <Grid>
+
+            <!-- 玻璃背景层：截取窗口身后的桌面并模糊。
+                 默认不使用（见 MainWindow.UseCapturedBackdrop）：截图在部分机器上会拍到黑帧，
+                 整块面板会被压成纯黑——这正是之前"面板离谱地黑"的根因。
+                 参考实现 V3.0 也不截屏，面板直接叠在实时桌面上。 -->
+            <Image x:Name="imgGlass" Stretch="UniformToFill"
+                   Margin="-1"
+                   Visibility="Collapsed"/>
+
+            <!-- 极轻压暗层：只把过亮壁纸的增量收一收（它在金属层下方，只有 20% 能透出来） -->
+            <Border x:Name="glassTint" Margin="-1">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#14050607" Offset="0"/>
+                        <GradientStop Color="#180A0D12" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+            </Border>
+
+            <!-- ============================================================
+                 液态玻璃材质层（LiquidGlass · 七层结构不变，参数换成液态玻璃）
+                 对齐参考实现 ProcessPanel V3.0 的 LiquidTheme：
+                 L1 清透蓝调基底(88%) → L2 中央暗区 → L3 三点反射(更白更亮)
+                 → L4 噪声 + 磨砂雾 → L5 折射棱边 + 色差双描边。
+                 直接叠在实时桌面上（根容器不铺底色），"透"由基底 alpha 决定。
+                 子项卡片（L6）不动。 -->
+            <Grid x:Name="MetalLayer" IsHitTestVisible="False">
+
+                <!-- L1 清透蓝调基底：135° 对角渐变，给表面一个主方向（纯色填充会死板） -->
+                <Border CornerRadius="16" Background="{StaticResource MetalBaseBrush}"/>
+
+                <!-- L2 ~ L4：反射光斑是椭圆/矩形，必须按圆角裁剪，
+                     否则四角会漏出方形亮斑（规范 7.2 的典型失败症状） -->
+                <Grid x:Name="MetalClip" ClipToBounds="True"
+                      SizeChanged="MetalClip_SizeChanged">
+
+                    <!-- L2 中央暗区：径向暗化中心，制造凹面纵深（缺这层整块发亮像塑料） -->
+                    <Rectangle Fill="{StaticResource MetalVignetteBrush}"/>
+
+                    <!-- L3 暖色球体：左上，170×120，峰值 0.22 —— 暖调来源，避免全冷发青 -->
+                    <Ellipse x:Name="WarmSpot" Width="170" Height="120"
+                             HorizontalAlignment="Left" VerticalAlignment="Top"
+                             Margin="-18,-26,0,0"
+                             Fill="{StaticResource ReflectWarmBrush}">
+                        <Ellipse.RenderTransform>
+                            <TranslateTransform x:Name="WarmOffset"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+
+                    <!-- L3 冷色板面：右下，220×150，峰值 0.17 —— 与暖调对冲 -->
+                    <Ellipse x:Name="CoolSpot" Width="220" Height="150"
+                             HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                             Margin="0,0,-22,-30"
+                             Fill="{StaticResource ReflectCoolBrush}">
+                        <Ellipse.RenderTransform>
+                            <TranslateTransform x:Name="CoolOffset"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+
+                    <!-- L3 白色灯条：上缘，250×5，倾斜 -18°，峰值 0.11 —— 金属感的关键 -->
+                    <Border x:Name="StripLight" Width="250" Height="5"
+                            HorizontalAlignment="Center" VerticalAlignment="Top"
+                            Margin="0,-16,0,0"
+                            Background="{StaticResource ReflectStripBrush}"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <TransformGroup>
+                                <RotateTransform Angle="-18"/>
+                                <TranslateTransform x:Name="StripOffset"/>
+                            </TransformGroup>
+                        </Border.RenderTransform>
+                    </Border>
+
+                    <!-- L4 微表面噪声：填充在代码里赋（64×64 冻结位图），不透明度固定 0.03 -->
+                    <Rectangle x:Name="NoiseLayer" Opacity="0.03" IsHitTestVisible="False"/>
+
+                    <!-- L4.5 磨砂层：对应 liquid-glass 的 blurAmount=0.0625，一层极轻的白雾 -->
+                    <Rectangle x:Name="FrostLayer" Fill="#08FFFFFF" IsHitTestVisible="False"/>
+                </Grid>
+
+                <!-- L5 倒角外层：折射聚焦感——比金属更亮、过渡更快（liquid-glass 边缘） -->
+                <Border CornerRadius="16" BorderThickness="1"
+                        BorderBrush="{StaticResource MetalEdgeOuterBrush}"
+                        IsHitTestVisible="False"/>
+
+                <!-- 色差：R/B 双通道错位 0.5~1.5px（对应 aberrationIntensity=2）。
+                     红 17/-0.5 在外，蓝 15/1.5 在内，主白棱边夹在中间 → 边缘出彩虹分离感 -->
+                <Border CornerRadius="17" BorderThickness="1" Margin="-0.5"
+                        BorderBrush="{StaticResource LiquidChromaWarmBrush}"
+                        IsHitTestVisible="False"/>
+
+                <!-- L5 倒角内层：向内偏移 1px，上亮下暗，形成内斜面
+                     内外圆角差 1px（16 / 15）保证同心 -->
+                <Border CornerRadius="15" BorderThickness="1" Margin="1"
+                        BorderBrush="{StaticResource MetalEdgeInnerBrush}"
+                        IsHitTestVisible="False"/>
+
+                <Border CornerRadius="15" BorderThickness="1" Margin="1.5"
+                        BorderBrush="{StaticResource LiquidChromaCoolBrush}"
+                        IsHitTestVisible="False"/>
+            </Grid>
+
+            <!-- ============================================================
+                 内容层
+                 ============================================================ -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel x:Name="pnlBody" Grid.Row="0" Margin="12,12,12,0"
+                            VerticalAlignment="Top">
+
+                    <!-- ===== 区域 A：硬件型号（无标题，只做设备识别） ===== -->
+                    <StackPanel x:Name="pnlHeader" Margin="0,0,0,8">
+                        <TextBlock x:Name="txtCpuName" Text="正在检测处理器…"
+                                   FontSize="10.5" Height="13"
+                                   Foreground="{StaticResource TextSecond}"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Text, ElementName=txtCpuName}"/>
+                        <TextBlock x:Name="txtGpuName" Text="正在检测显卡…"
+                                   FontSize="10.5" Height="13" Margin="0,1,0,0"
+                                   Foreground="{StaticResource TextSecond}"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Text, ElementName=txtGpuName}"/>
+                    </StackPanel>
+
+                    <!-- ===== 区域 B：CPU / 显卡 / 内存（三个独立功能单元） ===== -->
+                    <!-- 处理器：MonitorCard（左上温度、右上类别、右下利用率大环）
+                         显卡 / 内存：CircuitCard（左上温度、右上类别、左侧数据方框、GB/MB 单位状态灯、
+                                     圆环、白色光点沿连线与边框巡回）
+                         两套模板互不共用，靠 Kind 属性显式区分，绝不串用。
+                         卡片外部尺寸 / 圆角 / 背景 / 边框 / 悬停缩放全部沿用 HoverCard，未改动。 -->
+                    <Grid x:Name="pnlRings" Height="116" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 处理器：只有大环，没有三圈 -->
+                        <ContentControl Grid.Column="0" Style="{StaticResource HoverCard}">
+                            <local:MonitorCard x:Name="cardCpu" Kind="Cpu" IsHitTestVisible="False"/>
+                        </ContentControl>
+
+                        <!-- 显卡：方框 = 已用显存（真实数值，不写字），圆环 = GPU 利用率 -->
+                        <ContentControl Grid.Column="2" Style="{StaticResource HoverCard}">
+                            <local:CircuitCard x:Name="cardGpu" Kind="Gpu" IsHitTestVisible="False"/>
+                        </ContentControl>
+
+                        <!-- 内存：方框 = 已用内存，圆环内是呼吸光（已用容量就是占用，不重复显示） -->
+                        <ContentControl Grid.Column="4" Style="{StaticResource HoverCard}">
+                            <local:CircuitCard x:Name="cardMem" Kind="Memory" IsHitTestVisible="False"/>
+                        </ContentControl>
+                    </Grid>
+
+                    <!-- ===== 区域 C：磁盘分区（每个磁盘一个独立单元） ===== -->
+                    <StackPanel x:Name="pnlPartitions" Margin="0,0,0,8">
+
+                        <ContentControl Style="{StaticResource HoverCard}" Height="28"
+                                        Padding="8,0,8,0" Margin="0,0,0,4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="84"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- 运行指示层：光点沿边框巡回 + 盘符底下呼吸灯。
+                                     放在内容 Grid 的第一个子元素，所以在文字与进度条下方；
+                                     负边距抵消 Padding(8) 与边框(1)，覆盖整张卡片。 -->
+                                <local:DiskRowFx x:Name="fxPart0" Grid.ColumnSpan="3"
+                                                 Margin="-9,-1,-9,-1"/>
+                                <TextBlock x:Name="txtPartName0" Grid.Column="0" Text="C:"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextPrimary}"
+                                           VerticalAlignment="Center"/>
+                                <Grid Grid.Column="1" Height="6" VerticalAlignment="Center"
+                                      Margin="0,0,10,0">
+                                    <Border Background="{StaticResource BarTrack}" CornerRadius="3"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition x:Name="colPart0" Width="0*"/>
+                                            <ColumnDefinition x:Name="colPart0b" Width="100*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border x:Name="barPart0" Grid.Column="0"
+                                                Background="{StaticResource AccentCyan}" CornerRadius="3"/>
+                                    </Grid>
+                                </Grid>
+                                <TextBlock x:Name="txtPartInfo0" Grid.Column="2" Text="--%"
+                                           FontSize="10"
+                                           Foreground="{StaticResource TextSecond}"
+                                           TextAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+                        </ContentControl>
+
+                        <ContentControl Style="{StaticResource HoverCard}" Height="28"
+                                        Padding="8,0,8,0" Margin="0,0,0,4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="84"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- 运行指示层：光点沿边框巡回 + 盘符底下呼吸灯。
+                                     放在内容 Grid 的第一个子元素，所以在文字与进度条下方；
+                                     负边距抵消 Padding(8) 与边框(1)，覆盖整张卡片。 -->
+                                <local:DiskRowFx x:Name="fxPart1" Grid.ColumnSpan="3"
+                                                 Margin="-9,-1,-9,-1"/>
+                                <TextBlock x:Name="txtPartName1" Grid.Column="0" Text="D:"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextPrimary}"
+                                           VerticalAlignment="Center"/>
+                                <Grid Grid.Column="1" Height="6" VerticalAlignment="Center"
+                                      Margin="0,0,10,0">
+                                    <Border Background="{StaticResource BarTrack}" CornerRadius="3"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition x:Name="colPart1" Width="0*"/>
+                                            <ColumnDefinition x:Name="colPart1b" Width="100*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border x:Name="barPart1" Grid.Column="0"
+                                                Background="{StaticResource AccentCyan}" CornerRadius="3"/>
+                                    </Grid>
+                                </Grid>
+                                <TextBlock x:Name="txtPartInfo1" Grid.Column="2" Text="--%"
+                                           FontSize="10"
+                                           Foreground="{StaticResource TextSecond}"
+                                           TextAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+                        </ContentControl>
+
+                        <ContentControl Style="{StaticResource HoverCard}" Height="28"
+                                        Padding="8,0,8,0" Margin="0,0,0,4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="84"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- 运行指示层：光点沿边框巡回 + 盘符底下呼吸灯。
+                                     放在内容 Grid 的第一个子元素，所以在文字与进度条下方；
+                                     负边距抵消 Padding(8) 与边框(1)，覆盖整张卡片。 -->
+                                <local:DiskRowFx x:Name="fxPart2" Grid.ColumnSpan="3"
+                                                 Margin="-9,-1,-9,-1"/>
+                                <TextBlock x:Name="txtPartName2" Grid.Column="0" Text="E:"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextPrimary}"
+                                           VerticalAlignment="Center"/>
+                                <Grid Grid.Column="1" Height="6" VerticalAlignment="Center"
+                                      Margin="0,0,10,0">
+                                    <Border Background="{StaticResource BarTrack}" CornerRadius="3"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition x:Name="colPart2" Width="0*"/>
+                                            <ColumnDefinition x:Name="colPart2b" Width="100*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border x:Name="barPart2" Grid.Column="0"
+                                                Background="{StaticResource AccentCyan}" CornerRadius="3"/>
+                                    </Grid>
+                                </Grid>
+                                <TextBlock x:Name="txtPartInfo2" Grid.Column="2" Text="--%"
+                                           FontSize="10"
+                                           Foreground="{StaticResource TextSecond}"
+                                           TextAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+                        </ContentControl>
+
+                        <ContentControl Style="{StaticResource HoverCard}" Height="28"
+                                        Padding="8,0,8,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="84"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- 运行指示层：光点沿边框巡回 + 盘符底下呼吸灯。
+                                     放在内容 Grid 的第一个子元素，所以在文字与进度条下方；
+                                     负边距抵消 Padding(8) 与边框(1)，覆盖整张卡片。 -->
+                                <local:DiskRowFx x:Name="fxPart3" Grid.ColumnSpan="3"
+                                                 Margin="-9,-1,-9,-1"/>
+                                <TextBlock x:Name="txtPartName3" Grid.Column="0" Text="F:"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextPrimary}"
+                                           VerticalAlignment="Center"/>
+                                <Grid Grid.Column="1" Height="6" VerticalAlignment="Center"
+                                      Margin="0,0,10,0">
+                                    <Border Background="{StaticResource BarTrack}" CornerRadius="3"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition x:Name="colPart3" Width="0*"/>
+                                            <ColumnDefinition x:Name="colPart3b" Width="100*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border x:Name="barPart3" Grid.Column="0"
+                                                Background="{StaticResource AccentCyan}" CornerRadius="3"/>
+                                    </Grid>
+                                </Grid>
+                                <TextBlock x:Name="txtPartInfo3" Grid.Column="2" Text="--%"
+                                           FontSize="10"
+                                           Foreground="{StaticResource TextSecond}"
+                                           TextAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+                        </ContentControl>
+
+                    </StackPanel>
+
+                    <!-- ===== 区域 D：剪贴板扫描（外框 + 每条记录轻量边界） ===== -->
+                    <StackPanel x:Name="pnlClipboard" Margin="0,0,0,8">
+                        <ContentControl Style="{StaticResource CardStatic}" Padding="5">
+
+                            <StackPanel>
+
+                                <!-- 状态行 -->
+                                <Grid Height="16">
+                                    <TextBlock x:Name="txtClipState" Text="未检测"
+                                               FontSize="9.5" Foreground="{StaticResource TextDim}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="2,0,60,0"/>
+                                    <Button x:Name="btnClipDetect" Content="检测" Width="52" Height="18"
+                                            Style="{StaticResource PillBtn}"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            ToolTip="立即读取一次剪贴板；有内容且与已有记录不重复才记入"/>
+                                </Grid>
+
+                                <!-- 第 1 条（最新） -->
+                                <Border Style="{StaticResource RowHover}" Height="18" Margin="0,2,0,0">
+                                    <Grid>
+                                        <TextBlock x:Name="txtClip0" Text="—"
+                                                   FontSize="10.5" Foreground="{StaticResource TextPrimary}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Margin="6,0,44,0"/>
+                                        <Button x:Name="btnCopy0" Content="复制" Width="38" Height="15"
+                                                Style="{StaticResource PillBtn}"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                ToolTip="把第 1 条内容写回剪贴板"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- 第 2 条 -->
+                                <Border Style="{StaticResource RowHover}" Height="18" Margin="0,2,0,0">
+                                    <Grid>
+                                        <TextBlock x:Name="txtClip1" Text="—"
+                                                   FontSize="10.5" Foreground="{StaticResource TextSecond}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Margin="6,0,44,0"/>
+                                        <Button x:Name="btnCopy1" Content="复制" Width="38" Height="15"
+                                                Style="{StaticResource PillBtn}"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                ToolTip="把第 2 条内容写回剪贴板"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- 第 3 条 -->
+                                <Border Style="{StaticResource RowHover}" Height="18" Margin="0,2,0,0">
+                                    <Grid>
+                                        <TextBlock x:Name="txtClip2" Text="—"
+                                                   FontSize="10.5" Foreground="{StaticResource TextSecond}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Margin="6,0,44,0"/>
+                                        <Button x:Name="btnCopy2" Content="复制" Width="38" Height="15"
+                                                Style="{StaticResource PillBtn}"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                ToolTip="把第 3 条内容写回剪贴板"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- 第 4 条 -->
+                                <Border Style="{StaticResource RowHover}" Height="18" Margin="0,2,0,0">
+                                    <Grid>
+                                        <TextBlock x:Name="txtClip3" Text="—"
+                                                   FontSize="10.5" Foreground="{StaticResource TextSecond}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Margin="6,0,44,0"/>
+                                        <Button x:Name="btnCopy3" Content="复制" Width="38" Height="15"
+                                                Style="{StaticResource PillBtn}"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                ToolTip="把第 4 条内容写回剪贴板"/>
+                                    </Grid>
+                                </Border>
+
+                            </StackPanel>
+                        </ContentControl>
+                    </StackPanel>
+
+                    <!-- ===== 区域 E：物理磁盘活动（每盘一个独立单元） ===== -->
+                    <StackPanel x:Name="pnlDiskCard" Margin="0,0,0,4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 磁盘 0 -->
+                            <ContentControl Grid.Column="0" Style="{StaticResource HoverCard}" Padding="4">
+                                <StackPanel>
+                                    <TextBlock x:Name="txtPhys0" Text="磁盘0【C E】"
+                                               FontSize="10" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimary}"
+                                               HorizontalAlignment="Center" Height="14"/>
+                                    <Grid Height="14">
+                                        <TextBlock Text="写入" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="写入速度"/>
+                                        <TextBlock x:Name="valWrite0" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Height="14">
+                                        <TextBlock Text="读取" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="读取速度"/>
+                                        <TextBlock x:Name="valRead0" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Height="14">
+                                        <TextBlock Text="活动" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="活动时间占比（磁盘繁忙程度）"/>
+                                        <TextBlock x:Name="valAct0" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </ContentControl>
+
+                            <!-- 磁盘 1 -->
+                            <ContentControl Grid.Column="2" Style="{StaticResource HoverCard}" Padding="4">
+                                <StackPanel>
+                                    <TextBlock x:Name="txtPhys1" Text="磁盘1【D】"
+                                               FontSize="10" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimary}"
+                                               HorizontalAlignment="Center" Height="14"/>
+                                    <Grid Height="14">
+                                        <TextBlock Text="写入" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="写入速度"/>
+                                        <TextBlock x:Name="valWrite1" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Height="14">
+                                        <TextBlock Text="读取" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="读取速度"/>
+                                        <TextBlock x:Name="valRead1" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Height="14">
+                                        <TextBlock Text="活动" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="活动时间占比（磁盘繁忙程度）"/>
+                                        <TextBlock x:Name="valAct1" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </ContentControl>
+
+                            <!-- 磁盘 2 -->
+                            <ContentControl Grid.Column="4" Style="{StaticResource HoverCard}" Padding="4">
+                                <StackPanel>
+                                    <TextBlock x:Name="txtPhys2" Text="磁盘2【F】"
+                                               FontSize="10" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimary}"
+                                               HorizontalAlignment="Center" Height="14"/>
+                                    <Grid Height="14">
+                                        <TextBlock Text="写入" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="写入速度"/>
+                                        <TextBlock x:Name="valWrite2" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Height="14">
+                                        <TextBlock Text="读取" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="读取速度"/>
+                                        <TextBlock x:Name="valRead2" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Height="14">
+                                        <TextBlock Text="活动" FontSize="9"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="活动时间占比（磁盘繁忙程度）"/>
+                                        <TextBlock x:Name="valAct2" Text="--" FontSize="10"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                            </ContentControl>
+                        </Grid>
+                    </StackPanel>
+
+                </StackPanel>
+
+                <!-- ===== 区域 F：底部操作区（四个独立圆角按钮） ===== -->
+                <Grid x:Name="pnlButtons" Grid.Row="1" Height="30" Margin="12,8,12,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="btnThisPC" Grid.Column="0" Content="此电脑"
+                            Style="{StaticResource BarBtn}" ToolTip="打开「此电脑」"/>
+                    <Button x:Name="btnRefresh" Grid.Column="2" Content="刷新"
+                            Style="{StaticResource BarBtn}" ToolTip="立即重新采集全部数据"/>
+                    <Button x:Name="btnSettings" Grid.Column="4" Content="设置"
+                            Style="{StaticResource BarBtn}" ToolTip="打开设置面板"/>
+                    <Button x:Name="btnPower" Grid.Column="6" Content="电源"
+                            Style="{StaticResource BarBtnDanger}" ToolTip="关机 / 重启"/>
+                </Grid>
+            </Grid>
+
+            <!-- ============================================================
+                 浮层：与内容平级铺满面板，不参与布局测量
+                 ============================================================ -->
+
+            <!-- 设置浮层 -->
+            <Border x:Name="ovSettings" CornerRadius="16"
+                    Background="{StaticResource OverlayPanel}"
+                    BorderBrush="{StaticResource OverlayEdge}" BorderThickness="1"
+                    Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Height="44" Margin="14,0,14,0">
+                        <TextBlock Text="设置" FontSize="15" FontWeight="Bold"
+                                   Foreground="{StaticResource TextPrimary}"
+                                   VerticalAlignment="Center"/>
+                        <Button x:Name="btnSettingsClose" Content="关闭" Width="48" Height="20"
+                                Style="{StaticResource PillBtn}"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                ToolTip="关闭设置（Esc 同样可关）"/>
+                    </Grid>
+                    <Border Grid.Row="0" Style="{StaticResource HDivider}"
+                            VerticalAlignment="Bottom" Margin="14,0,14,0"/>
+
+                    <ScrollViewer x:Name="scvSettings" Grid.Row="1" Margin="14,2,6,0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.Resources>
+                            <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScroll}"/>
+                        </ScrollViewer.Resources>
+                        <StackPanel x:Name="pnlSettingsRows" Margin="0,0,4,6"/>
+                    </ScrollViewer>
+
+                    <Grid Grid.Row="2" Height="42" Margin="14,0,14,0">
+                        <Border Style="{StaticResource HDivider}" VerticalAlignment="Top"/>
+                        <TextBlock x:Name="txtSettingsFoot" FontSize="9"
+                                   Foreground="{StaticResource TextDim}"
+                                   VerticalAlignment="Center" Margin="0,6,0,0"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- 电源浮层 -->
+            <Border x:Name="ovPowerMask" CornerRadius="16"
+                    Background="#99000000" Visibility="Collapsed">
+                <Border Width="184" CornerRadius="10"
+                        Background="{StaticResource OverlayPanel}"
+                        BorderBrush="{StaticResource OverlayEdge}" BorderThickness="1"
+                        HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                        Margin="0,0,14,60">
+                    <StackPanel Margin="4,4,4,4">
+                        <TextBlock Text="电源选项" FontSize="11"
+                                   Foreground="{StaticResource TextSecond}"
+                                   Margin="12,5,0,5"/>
+                        <Button x:Name="btnPowerShutdown" Content="关机"
+                                Style="{StaticResource OvBtn}"
+                                Foreground="{StaticResource DangerRed}"/>
+                        <Button x:Name="btnPowerRestart" Content="重启"
+                                Style="{StaticResource OvBtn}"
+                                Foreground="{StaticResource WarnOrange}"/>
+                        <Button x:Name="btnPowerCancel" Content="取消"
+                                Style="{StaticResource OvBtn}"
+                                Foreground="{StaticResource TextSecond}"/>
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <!-- 二次确认浮层 -->
+            <Border x:Name="ovConfirmMask" CornerRadius="16"
+                    Background="#B3000000" Visibility="Collapsed">
+                <Border Width="252" CornerRadius="10"
+                        Background="{StaticResource OverlayPanel}"
+                        BorderBrush="{StaticResource OverlayEdge}" BorderThickness="1"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Margin="16,16,16,16">
+                        <TextBlock x:Name="txtConfirmTitle" Text="确认操作"
+                                   FontSize="14" FontWeight="Bold"
+                                   Foreground="{StaticResource TextPrimary}"/>
+                        <TextBlock x:Name="txtConfirmText" Text="是否继续？"
+                                   FontSize="12" Foreground="{StaticResource TextSecond}"
+                                   TextWrapping="Wrap" Margin="0,10,0,16"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="btnConfirmCancel" Grid.Column="0" Content="取消"
+                                    Style="{StaticResource OvActionBtn}"
+                                    Foreground="{StaticResource TextPrimary}"/>
+                            <Button x:Name="btnConfirmOk" Grid.Column="2" Content="确定"
+                                    Style="{StaticResource OvActionBtn}"
+                                    Foreground="{StaticResource DangerRed}"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <!-- ============================================================
+                 注：原先这里还有一道最顶层的 1px 深色描边（edgeLine），
+                 本轮已移除 —— 规范要求外轮廓「只有一条连续 1px 高光」，
+                 轮廓统一交给金属层的 L5 倒角（外缘 + 内缘双线）。
+                 浮层（设置/电源/确认）自带 OverlayEdge 边框，不会失去轮廓。
+                 ============================================================ -->
+
+        </Grid>
+    </Border>
+</Window>
