@@ -96,7 +96,7 @@
 
 ## 安装
 
-从 [Releases](../../releases) 下载 `桌面性能助手_Setup_1.0.0.exe`，双击运行。
+从 [Releases](../../releases) 下载 `DesktopPerformanceMonitor_Setup_1.0.1.exe`，双击运行。
 
 - 用户级安装，**不需要管理员权限、不弹 UAC**
 - 默认安装目录：`%LOCALAPPDATA%\Programs\桌面性能助手`
